@@ -90,7 +90,9 @@ public class LottieValueAnimator extends BaseLottieAnimator implements Choreogra
       return;
     }
 
-    L.beginSection("LottieValueAnimator#doFrame");
+    if (L.isTraceEnabled()) {
+      L.beginSection("LottieValueAnimator#doFrame");
+    }
     long timeSinceFrame = lastFrameTimeNs == 0 ? 0 : frameTimeNanos - lastFrameTimeNs;
     float frameDuration = getFrameDurationNs();
     float dFrames = timeSinceFrame / frameDuration;
@@ -103,18 +105,14 @@ public class LottieValueAnimator extends BaseLottieAnimator implements Choreogra
 
     lastFrameTimeNs = frameTimeNanos;
 
-    if (!useCompositionFrameRate || frameRaw != previousFrameRaw) {
-      notifyUpdate();
-    }
     if (ended) {
       if (getRepeatCount() != INFINITE && repeatCount >= getRepeatCount()) {
         frameRaw = speed < 0 ? getMinFrame() : getMaxFrame();
         frame = frameRaw;
         removeFrameCallback();
+        checkNotifyUpdate(previousFrameRaw);
         notifyEnd(isReversed());
       } else {
-        notifyRepeat();
-        repeatCount++;
         if (getRepeatMode() == REVERSE) {
           speedReversedForRepeatMode = !speedReversedForRepeatMode;
           reverseAnimationSpeed();
@@ -123,11 +121,24 @@ public class LottieValueAnimator extends BaseLottieAnimator implements Choreogra
           frame = frameRaw;
         }
         lastFrameTimeNs = frameTimeNanos;
+        checkNotifyUpdate(previousFrameRaw);
+        notifyRepeat();
+        repeatCount++;
       }
+    } else {
+      checkNotifyUpdate(previousFrameRaw);
     }
 
     verifyFrame();
-    L.endSection("LottieValueAnimator#doFrame");
+    if (L.isTraceEnabled()) {
+      L.endSection("LottieValueAnimator#doFrame");
+    }
+  }
+
+  private void checkNotifyUpdate(float previousFrameRaw) {
+    if (!useCompositionFrameRate || frameRaw != previousFrameRaw) {
+      notifyUpdate();
+    }
   }
 
   private float getFrameDurationNs() {
@@ -238,6 +249,7 @@ public class LottieValueAnimator extends BaseLottieAnimator implements Choreogra
   @MainThread
   public void pauseAnimation() {
     removeFrameCallback();
+    notifyPause();
   }
 
   @MainThread
@@ -250,6 +262,7 @@ public class LottieValueAnimator extends BaseLottieAnimator implements Choreogra
     } else if (!isReversed() && getFrame() == getMaxFrame()) {
       setFrame(getMinFrame());
     }
+    notifyResume();
   }
 
   @MainThread
