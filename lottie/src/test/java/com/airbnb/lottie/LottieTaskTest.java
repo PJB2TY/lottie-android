@@ -1,15 +1,24 @@
 package com.airbnb.lottie;
 
-import org.junit.Before;
 import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.mockito.Mockito.*;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 public class LottieTaskTest extends BaseTest {
 
@@ -18,10 +27,8 @@ public class LottieTaskTest extends BaseTest {
   @Mock
   public LottieListener<Throwable> failureListener;
 
-  @Before
-  public void setup() {
-    MockitoAnnotations.initMocks(this);
-  }
+  @Rule
+  public MockitoRule rule = MockitoJUnit.rule();
 
   @Test
   public void testListener() {
@@ -29,7 +36,7 @@ public class LottieTaskTest extends BaseTest {
         .addListener(successListener)
         .addFailureListener(failureListener);
     verify(successListener, times(1)).onResult(5);
-    verifyZeroInteractions(failureListener);
+    verifyNoInteractions(failureListener);
   }
 
   @Test
@@ -40,7 +47,7 @@ public class LottieTaskTest extends BaseTest {
     }, true)
         .addListener(successListener)
         .addFailureListener(failureListener);
-    verifyZeroInteractions(successListener);
+    verifyNoInteractions(successListener);
     verify(failureListener, times(1)).onResult(exception);
   }
 
@@ -69,8 +76,8 @@ public class LottieTaskTest extends BaseTest {
     } catch (InterruptedException e) {
       throw new IllegalStateException(e);
     }
-    verifyZeroInteractions(successListener);
-    verifyZeroInteractions(failureListener);
+    verifyNoInteractions(successListener);
+    verifyNoInteractions(failureListener);
   }
 
   @Test
@@ -84,6 +91,46 @@ public class LottieTaskTest extends BaseTest {
     task.addListener(successListener);
     task.addFailureListener(failureListener);
     verify(successListener, times(1)).onResult(5);
-    verifyZeroInteractions(failureListener);
+    verifyNoInteractions(failureListener);
+  }
+
+  @Test
+  public void executorIsRealThreadPoolByDefault() {
+    AtomicBoolean isDirect = new AtomicBoolean();
+    LottieTask.EXECUTOR.execute(() -> isDirect.set(true));
+    assertFalse(isDirect.get());
+  }
+
+  @Test
+  public void executorIsDirectWhenTestingPropertySetToTrue() throws Exception {
+    // Use a custom ClassLoader to force a new class instance which will cause the
+    // static initializers to run and observe the new system property set below.
+    String lottieTaskName = LottieTask.class.getName();
+    ClassLoader customLoader = new ClassLoader() {
+      @Override public Class<?> loadClass(String name) throws ClassNotFoundException {
+        if (name.equals(lottieTaskName)) {
+          try (InputStream in = ClassLoader.getSystemResourceAsStream(lottieTaskName.replace('.', '/') + ".class")) {
+            byte[] bytes = new byte[10 * 1024 * 1024];
+            int read  = in.read(bytes);
+            return defineClass(name, bytes, 0, read);
+          } catch (IOException e) {
+            throw new ClassNotFoundException(name, e);
+          }
+        }
+        return super.loadClass(name);
+      }
+    };
+
+    System.setProperty(LottieTask.DIRECT_EXECUTOR_PROPERTY_NAME, "true");
+    try {
+      Class<?> c = customLoader.loadClass(lottieTaskName);
+      Executor e = (Executor) c.getField("EXECUTOR").get(null);
+
+      AtomicBoolean isDirect = new AtomicBoolean();
+      e.execute(() -> isDirect.set(true));
+      assertTrue(isDirect.get());
+    } finally {
+      System.clearProperty(LottieTask.DIRECT_EXECUTOR_PROPERTY_NAME);
+    }
   }
 }
